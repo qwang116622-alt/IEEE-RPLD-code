@@ -1,0 +1,17 @@
+# Local data
+data/
+*.xlsx
+*.csv
+
+# Trained weights and generated artefacts
+*.pth
+outputs/
+prediction_figures/
+prediction_results/
+experiment_results/
+target_distribution.png
+
+# Python caches
+__pycache__/
+*.py[cod]
+
