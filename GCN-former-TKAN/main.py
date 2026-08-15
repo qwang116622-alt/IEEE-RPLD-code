@@ -9,7 +9,7 @@ import argparse
 
 # 导入自定义模块
 from config import DATA_CONFIG, GCN_CONFIG, TKAN_CONFIG, TRANSFORMER_CONFIG, TRAIN_CONFIG, RESULT_CONFIG
-from data_processor import DataProcessor
+from data_processor import DataProcessor, get_pile_feature_columns
 from models import PileDisplacementModel
 from evaluator import ModelEvaluator
 
@@ -122,8 +122,8 @@ def main():
     """
     # 添加命令行参数解析
     parser = argparse.ArgumentParser(description='基坑支护桩水平位移预测模型')
-    parser.add_argument('--load_model', action='store_true', 
-                        help='直接加载best_model.pth进行预测，跳过训练步骤')
+    parser.add_argument('--load_model', action='store_true',
+                        help='直接加载 outputs/best_model.pth 进行预测，跳过训练步骤')
     args = parser.parse_args()
     
     print("=" * 60)
@@ -165,7 +165,7 @@ def main():
         print("未找到预计算邻接矩阵，将从本地数据计算 Spearman 邻接矩阵")
         from spearman_utils import SpearmanAdjacencyMatrixGenerator
         data = data_processor.data
-        j_columns = [f'J{i}' for i in range(1, 21)]
+        j_columns = get_pile_feature_columns(DATA_CONFIG['target_point'])
         generator = SpearmanAdjacencyMatrixGenerator(threshold=0.6)
         adj_matrix, _ = generator.generate_adjacency_matrix(data, j_columns)
     
@@ -179,7 +179,6 @@ def main():
     
     # 初始化训练损失记录
     train_losses = []
-    val_losses = []
     
     # 4. 模型训练（如果未指定加载模型）
     if not args.load_model:
@@ -198,13 +197,12 @@ def main():
         scheduler = ReduceLROnPlateau(
             optimizer, 
             mode='min', 
-            factor=0.5, 
-            patience=10,                               #原本为5被我调整为10
-            # 移除verbose参数，因为它已被弃用
+            factor=TRAIN_CONFIG['scheduler_factor'],
+            patience=TRAIN_CONFIG['scheduler_patience'],
         )
         
         # 早停机制
-        best_val_loss = float('inf')
+        best_train_loss = float('inf')
         patience_counter = 0
         
         start_time = time.time()
@@ -214,27 +212,24 @@ def main():
             train_loss = train(model, train_loader, optimizer, criterion, device)
             train_losses.append(train_loss)
             
-            # 验证
-            val_loss = validate(model, test_loader, criterion, device)  # 这里使用测试集作为验证集
-            val_losses.append(val_loss)
-            
-            # 更新学习率
-            scheduler.step(val_loss)
+            # The manuscript monitors training MSE for scheduling and early
+            # stopping. The chronological test set remains untouched until
+            # final evaluation.
+            scheduler.step(train_loss)
             
             # 早停检查
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if train_loss < best_train_loss:
+                best_train_loss = train_loss
                 patience_counter = 0
-                # 保存最佳模型
-                torch.save(model.state_dict(), 'best_model.pth')
+                os.makedirs(os.path.dirname(RESULT_CONFIG['model_path']), exist_ok=True)
+                torch.save(model.state_dict(), RESULT_CONFIG['model_path'])
             else:
                 patience_counter += 1
             
             # 打印训练进度
             print(f"Epoch [{epoch}/{TRAIN_CONFIG['epochs']}], "
                   f"Train Loss: {train_loss:.6f}, "
-                  f"Val Loss: {val_loss:.6f}, "
-                  f"Best Val Loss: {best_val_loss:.6f}")
+                   f"Best Train Loss: {best_train_loss:.6f}")
             
             # 早停
             if patience_counter >= TRAIN_CONFIG['patience']:
@@ -248,7 +243,7 @@ def main():
     
     # 5. 加载最佳模型
     print("\n5. 加载最佳模型...")
-    model.load_state_dict(torch.load('best_model.pth', weights_only=True))
+    model.load_state_dict(torch.load(RESULT_CONFIG['model_path'], weights_only=True))
     
     # 7. 模型评估
     print("\n6. 模型评估...")
@@ -298,7 +293,7 @@ def main():
     print("\n8. 生成可视化结果...")
     
     # 9.1 生成测试集可视化结果
-    evaluator.visualize_all(test_timestamps, test_targets, test_predictions, DATA_CONFIG['target_point'], train_losses, val_losses)
+    evaluator.visualize_all(test_timestamps, test_targets, test_predictions, DATA_CONFIG['target_point'], train_losses, None)
     
     # 10. 保存评估指标
     print("\n9. 保存评估指标...")
