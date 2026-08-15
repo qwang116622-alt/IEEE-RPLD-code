@@ -18,32 +18,37 @@ DATA_CONFIG = {
 
 # GCN配置（简化）
 GCN_CONFIG = {
-    'num_nodes': 20,       # J1-J20节点数（扩展）
+    # The target point is withheld from the 19 pile-deformation inputs.
+    'num_nodes': 19,
     'input_dim': 1,        # 每个节点的输入维度
-    'hidden_dim': 32,      # GCN隐藏层维度（简化）        原本32被我调整为64
-    'output_dim': 32,      # GCN输出维度（简化）
-    'num_layers': 1,       # GCN层数（简化）
-    'dropout': 0.3         # Dropout率                 原本0.3改为0.2
+    'hidden_dim': 32,
+    'output_dim': 32,
+    'num_layers': 2,
+    'dropout': 0.0
 }
 
 # TKAN配置（简化）
 TKAN_CONFIG = {
     'jg_input_dim': 11,    # JG1-JG11的维度
     'aq_input_dim': 17,    # AQ1-AQ17的维度
-    'j_input_dim': 20,     # J1-J20的维度
-    'hidden_dim': 64,      # TKAN隐藏层维度（简化）                         原本为32被我调整为64
-    'num_layers': 1,       # TKAN层数（简化）
-    'output_dim': 32,      # TKAN输出维度（简化）
-    'dropout': 0.3         # Dropout率                 原本0.3改为0.2
+    'j_input_dim': 19,     # 除预测目标外的19个桩体位移点
+    'hidden_dim': 128,
+    'num_layers': 2,
+    'num_kan_units': 3,
+    'grid_size': 5,
+    'spline_order': 3,
+    'output_dim': 128,
+    'dropout': 0.0
 }
 
 # Transformer配置（简化）
 TRANSFORMER_CONFIG = {
     'input_dim': 32,       # GCN输出维度
-    'hidden_dim': 48,      # Transformer隐藏层维度（简化）         原本48我改为64
-    'num_heads': 2,        # 注意力头数（简化）
-    'num_layers': 1,       # Transformer层数（简化）
-    'dropout': 0.3         # Dropout率                 原本0.3改为0.2
+    'hidden_dim': 64,
+    'num_heads': 2,
+    'num_layers': 2,
+    'feedforward_dim': 256,
+    'dropout': 0.0
 }
 
 ''' BiLSTM配置（新增）
@@ -57,15 +62,18 @@ BILSTM_CONFIG = {
 
 # 训练配置
 TRAIN_CONFIG = {
-    'learning_rate': 0.001,    # 学习率
-    'weight_decay': 1e-4,       # 权重衰减         原本是1e-4
-    'epochs': 100,              # 训练轮数
-    'patience': 20,             # 早停 patience                               原本为10被我调整为50
+    'learning_rate': 1e-4,
+    'weight_decay': 0.0,
+    'epochs': 150,
+    'patience': 15,
+    'scheduler_factor': 0.5,
+    'scheduler_patience': 10,
     'device': 'cuda' if torch.cuda.is_available() else 'cpu'  # 设备
 }
 
 # 结果保存配置
 RESULT_CONFIG = {
+    'model_path': 'outputs/best_model.pth',
     'save_path': 'outputs/prediction_results.xlsx',  # 预测结果保存路径
     'fig_save_path': 'outputs/prediction_figures/'   # 可视化结果保存路径
 }
