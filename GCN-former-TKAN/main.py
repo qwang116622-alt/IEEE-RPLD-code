@@ -9,7 +9,7 @@ import argparse
 
 # 导入自定义模块
 from config import DATA_CONFIG, GCN_CONFIG, TKAN_CONFIG, TRANSFORMER_CONFIG, TRAIN_CONFIG, RESULT_CONFIG
-from data_processor import DataProcessor, get_pile_feature_columns
+from data_processor import DataProcessor
 from models import PileDisplacementModel
 from evaluator import ModelEvaluator
 
@@ -165,7 +165,7 @@ def main():
         print("未找到预计算邻接矩阵，将从本地数据计算 Spearman 邻接矩阵")
         from spearman_utils import SpearmanAdjacencyMatrixGenerator
         data = data_processor.data
-        j_columns = get_pile_feature_columns(DATA_CONFIG['target_point'])
+        j_columns = [f'J{i}' for i in range(1, 21)]
         generator = SpearmanAdjacencyMatrixGenerator(threshold=0.6)
         adj_matrix, _ = generator.generate_adjacency_matrix(data, j_columns)
     
