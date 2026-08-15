@@ -1,7 +1,21 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
+
+
+def get_pile_feature_columns(target_col):
+    """Return the 19 pile-displacement inputs after withholding the target.
+
+    The manuscript uses 47 inputs: 11 JG variables, 17 AQ variables, and the
+    other 19 retaining-pile monitoring points.  Keeping the target out of the
+    contemporaneous input avoids target leakage in next-step prediction.
+    """
+    pile_columns = [f'J{i}' for i in range(1, 21)]
+    if target_col not in pile_columns:
+        raise ValueError(
+            f"target_col must be one of {pile_columns}; received {target_col!r}"
+        )
+    return [column for column in pile_columns if column != target_col]
 
 class PileDisplacementDataset(Dataset):
     """
@@ -74,14 +88,17 @@ class PileDisplacementDataset(Dataset):
         # 分离不同类型的监测点
         jg_cols = [f'JG{i}' for i in range(1, 12)]  # JG1-JG11
         aq_cols = [f'AQ{i}' for i in range(1, 18)]  # AQ1-AQ17
-        j_cols = [f'J{i}' for i in range(1, 21)]    # J1-J20
-        j1_j20_cols = [f'J{i}' for i in range(1, 21)]  # J1-J20（用于GCN，扩展）
+        j_cols = get_pile_feature_columns(self.target_col)  # 19 non-target J points
+
+        required_columns = jg_cols + aq_cols + [f'J{i}' for i in range(1, 21)]
+        missing_columns = [column for column in required_columns if column not in self.data.columns]
+        if missing_columns:
+            raise ValueError(f"Input workbook is missing required columns: {missing_columns}")
         
         # 创建特征矩阵
         jg_data = self.data[jg_cols].values
         aq_data = self.data[aq_cols].values
         j_data = self.data[j_cols].values
-        j1_j20_data = self.data[j1_j20_cols].values
         target_data = self.data[self.target_col].values
         
         # 生成滑动窗口
@@ -90,7 +107,6 @@ class PileDisplacementDataset(Dataset):
             jg_seq = jg_data[i:i+self.seq_length]
             aq_seq = aq_data[i:i+self.seq_length]
             j_seq = j_data[i:i+self.seq_length]
-            j1_j20_seq = j1_j20_data[i:i+self.seq_length]
             
             # 提取目标值
             target = target_data[i+self.seq_length]
@@ -103,14 +119,12 @@ class PileDisplacementDataset(Dataset):
                 jg_seq = self._augment_sequence(jg_seq)
                 aq_seq = self._augment_sequence(aq_seq)
                 j_seq = self._augment_sequence(j_seq)
-                j1_j20_seq = self._augment_sequence(j1_j20_seq)
             
             # 将特征组合为字典
             feature = {
                 'jg': jg_seq,
                 'aq': aq_seq,
-                'j': j_seq,
-                'j1_j20': j1_j20_seq
+                'j': j_seq
             }
             
             features.append(feature)
@@ -128,11 +142,12 @@ class PileDisplacementDataset(Dataset):
         timestamp = self.timestamps[idx]
 
         # 转换为numpy数组，返回模型需要的所有特征
-        # 特征名与模型期望的一致：jg1_jg11, aq1_aq17, j1_j20
+        # j1_j20 keeps the historical model interface; it contains 19
+        # non-target pile features, not the target itself.
         feature_np = {
             'jg1_jg11': np.array(feature['jg'], dtype=np.float32),
             'aq1_aq17': np.array(feature['aq'], dtype=np.float32),
-            'j1_j20': np.array(feature['j1_j20'], dtype=np.float32)
+            'j1_j20': np.array(feature['j'], dtype=np.float32)
         }
 
         # 将Timestamp转换为字符串格式，避免DataLoader的collate错误
@@ -356,8 +371,7 @@ if __name__ == '__main__':
         features, targets, timestamps = batch
         print(f"JG特征形状: {features['jg'].shape}")
         print(f"AQ特征形状: {features['aq'].shape}")
-        print(f"J特征形状: {features['j'].shape}")
-        print(f"J1-J20特征形状: {features['j1_j20'].shape}")
+        print(f"J特征形状: {features['j1_j20'].shape}（已排除目标点）")
         print(f"目标形状: {targets.shape}")
         break
 
