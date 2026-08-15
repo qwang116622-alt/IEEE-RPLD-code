@@ -1,142 +1,109 @@
 # GCN-former-TKAN
 
-GCN-former-TKAN is a PyTorch workflow for **training and evaluating a time-series model that predicts the lateral displacement of deep-excavation retaining piles**. It combines spatial relations between monitoring points (GCN), temporal feature encoding (Transformer), and nonlinear sequence prediction (TKAN).
+本仓库实现论文中的深基坑围护桩水平位移一步预测流程：以监测点间的空间关联为图结构，结合 GCN、Transformer 和 TKAN 预测指定桩点的下一时刻水平位移。
 
-> This repository contains code only. It does not include project monitoring data, trained model weights, prediction tables, or figures.
+> 仓库只包含代码，不包含监测数据、坐标、训练权重、预测表或图件。该工具用于科研复现和辅助分析，不能替代现场巡检、设计复核或工程预警决策。
 
-## Who this is for
+## 适用对象与任务
 
-- Geotechnical and structural engineers monitoring deep excavations.
-- Researchers studying data-driven prediction of retaining-structure deformation.
-- Data scientists who have time-indexed excavation-monitoring data and want a reproducible PyTorch baseline.
+适用于拥有按时间排序的基坑监测数据的岩土工程研究人员、监测工程师和数据分析人员。每次预测使用连续 7 个历史时刻的数据，输出一个目标桩点在下一个时刻的位移预测值。
 
-It is not a real-time warning system by itself and must not replace site inspections, design checks, or engineering judgment.
+论文对应的输入由 47 个变量组成：11 个 `JG` 特征、17 个 `AQ` 特征，以及除目标桩点外的 19 个围护桩位移特征。代码会自动把 `target_point` 从 `J1`–`J20` 的图节点和输入特征中排除，避免把待预测点作为同期输入而造成数据泄漏。
 
-## What the code does
+## 论文对应的默认网络与超参数
 
-For each prediction time, the model uses the preceding `seq_length` observations (default: 7) from three groups of monitoring variables:
+| 模块 | 当前默认实现 |
+| --- | --- |
+| 图构建 | 19 个非目标桩点；Spearman 相关系数阈值 `0.6`；加自环并作对称归一化 |
+| GCN | 2 层图卷积，每层 32 维 |
+| Transformer | 2 个编码器层、2 个注意力头、64 维隐藏表示、256 维前馈层；输入层归一化和位置编码 |
+| TKAN | 2 个时序 KAN 层；每层 3 个 KAN 单元；128 维隐藏状态；三阶 B 样条、网格大小 5；带输入/遗忘/输出门的时间记忆 |
+| 预测头 | 最后一时刻 TKAN 表示经线性层输出一个标量 |
+| 优化器与损失 | Adam、MSE |
+| 初始学习率 | `1e-4` |
+| 调度器 | `ReduceLROnPlateau`，因子 `0.5`、耐心值 10 |
+| 批量大小 / 最大轮数 | 32 / 150 |
+| 早停 | 训练 MSE 连续 15 轮未改善时停止 |
+| 时间窗口 | 7 个历史时刻 |
 
-| Group | Required columns | Role in the model |
-| --- | --- | --- |
-| `JG` | `JG1`–`JG11` | Engineering / construction-condition features |
-| `AQ` | `AQ1`–`AQ17` | Auxiliary monitoring features |
-| `J` | `J1`–`J20` | Retaining-pile displacement monitoring points |
+配置集中在 `config.py`。如果为新数据集改动输入列、特征数或模型宽度，应同时检查 `DATA_CONFIG`、`GCN_CONFIG`、`TKAN_CONFIG` 与 `TRANSFORMER_CONFIG` 是否保持一致。
 
-The workflow chronologically splits the dataset into training and test periods, fits normalization only on the training portion, trains the model, and produces a next-step prediction for the configured target point (default: `J19`). During training, it saves the best model; after evaluation, it creates prediction tables, error metrics, and figures locally.
+## 数据准备（仅在本地）
 
-If a local adjacency matrix is absent, `main.py` calculates a 20×20 Spearman-correlation adjacency matrix from `J1`–`J20`. This means no precomputed matrix needs to be uploaded or stored in the repository.
+在项目目录创建 `data` 文件夹，并把私有 Excel 文件保存为 `data/preprocessed_data_no_normalization.xlsx`，或在 `config.py` 修改 `file_path`。
 
-## Repository contents
+工作簿要求：
 
-- `main.py`: main training and evaluation entry point.
-- `models.py`: GCN, Transformer, and TKAN model definitions.
-- `data_processor.py`: chronological splitting, normalization, and sequence construction.
-- `evaluator.py`: inverse normalization, metrics, prediction tables, and figures.
-- `spearman_utils.py`: Spearman-correlation adjacency-matrix generation.
-- `experiment.py`: baseline and ablation experiment runner.
-- `config.py`: data path, target point, model, and training settings.
+- 每行代表一个监测时刻，按从早到晚排序；
+- 有可转换为日期时间的 `index` 列；
+- 包含数值列 `JG1`–`JG11`、`AQ1`–`AQ17`、`J1`–`J20`；
+- 用作 `target_point` 的列必须属于 `J1`–`J20`；
+- 所用列不应含缺失值。
 
-## Before you run it
+默认采用按时间顺序的 80%/20% 训练—测试划分。归一化器仅用训练期拟合；测试期只在训练结束后用于最终评估。不要把数据、权重或生成结果提交到 GitHub。
 
-1. Install Python 3.10 or later. The code was verified with Python 3.10.15 and PyTorch 2.4.1.
-2. Download or clone this repository.
-3. Create a local `data` directory inside `GCN-former-TKAN`.
-4. Put your private Excel workbook in that directory as `preprocessed_data_no_normalization.xlsx`.
-
-Your local layout should look like this:
+目录示例：
 
 ```text
 GCN-former-TKAN/
 ├── data/
-│   └── preprocessed_data_no_normalization.xlsx  # private; never commit
+│   └── preprocessed_data_no_normalization.xlsx  # 私有数据，不上传
 ├── config.py
 ├── main.py
 ├── models.py
 └── requirements.txt
 ```
 
-## Input workbook specification
+## 安装与运行
 
-The Excel workbook must contain one row per monitoring time. It must include:
+推荐使用 Python 3.10+。本代码使用 Python 3.10.15、PyTorch 2.4.1 进行过结构与随机数据前向/反向验证。
 
-- An `index` column that can be converted to a timestamp.
-- All numeric feature columns `JG1`–`JG11`, `AQ1`–`AQ17`, and `J1`–`J20`.
-- No missing values in the columns used for training.
-- Rows ordered chronologically, from oldest to newest.
-
-The selected target point (for example, `J19`) must be included among `J1`–`J20`, because it is the value predicted at the next time step.
-
-## Installation
-
-From the `GCN-former-TKAN` directory, create and activate an environment, then install the dependencies:
-
-```bash
-python -m venv .venv
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+```powershell
+cd GCN-former-TKAN
+D:\AiSoftware\Anaconda3\envs\PyTorch_cpu\python.exe -m pip install -r requirements.txt
+D:\AiSoftware\Anaconda3\envs\PyTorch_cpu\python.exe main.py
 ```
 
-For a computer with NVIDIA CUDA support, install the PyTorch build appropriate to your CUDA version from [pytorch.org](https://pytorch.org/get-started/locally/) before or instead of the generic `torch` entry in `requirements.txt`.
+在 CPU 环境中可直接运行；如需 CUDA，请安装与本机 CUDA 匹配的 PyTorch，并在 `config.py` 中确认设备设置。
 
-## Configure a run
+要仅评估已经训练好的本地权重，请将权重置于 `outputs/best_model.pth` 后运行：
 
-Open `config.py` and adjust these fields in `DATA_CONFIG`:
+```powershell
+D:\AiSoftware\Anaconda3\envs\PyTorch_cpu\python.exe main.py --load_model
+```
+
+## 常用配置
+
+在 `config.py` 调整：
 
 ```python
-'file_path': 'data/preprocessed_data_no_normalization.xlsx',
-'target_point': 'J19',
-'test_size': 0.2,
-'seq_length': 7,
+DATA_CONFIG['target_point'] = 'J19'  # 可改为 J1–J20 中任一点
+DATA_CONFIG['seq_length'] = 7
+DATA_CONFIG['test_size'] = 0.2
 ```
 
-- `file_path`: local path to the private workbook.
-- `target_point`: one of `J1`–`J20`.
-- `test_size`: proportion reserved for the latest test period. The split is chronological, not random.
-- `seq_length`: number of preceding observations used for each prediction.
+改变目标点后，代码自动把该点从 19 个桩位移输入和 Spearman 图中排除。若使用预计算邻接矩阵 `data/mic_adjacency_matrix.csv`，它必须是与这 19 个非目标桩点顺序一致的 `19 × 19` 矩阵；否则删除该本地文件，程序会从工作簿计算邻接矩阵。
 
-You may also change `epochs`, `learning_rate`, `patience`, and network widths in `TRAIN_CONFIG`, `GCN_CONFIG`, `TKAN_CONFIG`, and `TRANSFORMER_CONFIG`.
+## 输出与解释
 
-## Train and evaluate
+训练得到的权重保存在 `outputs/best_model.pth`。预测表、评价指标和图件也只会保存在本地 `outputs/` 下。输出指标包括 MAE、MAPE、RMSE 和 R²。
 
-Run:
+指标应仅针对时间上更晚、未参与训练和参数选择的测试期解释。即使误差很低，也应结合传感器质量、施工工况、地质条件和工程安全限值进行独立复核。
 
-```bash
-python main.py
-```
+## 文件说明
 
-The code automatically chooses CUDA when PyTorch detects it; otherwise, it runs on CPU. To evaluate an existing local weight file without training again, place `best_model.pth` in the project directory and run:
+- `models.py`：论文配置的 GCN、位置编码 Transformer 与门控时序 KAN。
+- `data_processor.py`：时间切分、仅训练集拟合的归一化、47 维输入序列构建。
+- `spearman_utils.py`：Spearman 图邻接矩阵生成。
+- `main.py`：训练、学习率调度、早停与最终测试评估。
+- `evaluator.py`：反归一化、指标、预测表和图件。
+- `experiment.py`：原始实验管理脚本；正式论文配置请以 `main.py` 和 `config.py` 为准。
 
-```bash
-python main.py --load_model
-```
+## 故障排查
 
-## Outputs
-
-All generated outputs are stored locally and ignored by Git:
-
-- `best_model.pth`: best model parameters found during the run.
-- `outputs/prediction_results.xlsx`: test predictions.
-- `outputs/prediction_results_train.xlsx`: training-period predictions.
-- `outputs/prediction_results/test_predictions.xlsx`: an additional saved test-prediction table.
-- `outputs/prediction_figures/`: prediction curve, scatter plot, loss curve, and metrics text file.
-
-Metrics include MAE, MAPE, RMSE, and R². Interpret them only against a properly held-out, chronologically later test period; strong training performance alone does not demonstrate predictive validity.
-
-## Privacy and safe publishing
-
-`.gitignore` excludes data, CSV/Excel files, weight files, outputs, figures, and Python caches. Before every push, run `git status` and verify that only source code and documentation are staged. Do not upload monitoring data, coordinates, site drawings, personal information, or proprietary model weights unless you have explicit permission.
-
-## Troubleshooting
-
-- **`FileNotFoundError`**: confirm the workbook is at `data/preprocessed_data_no_normalization.xlsx`, or update `file_path` in `config.py`.
-- **Missing column error**: add the full required set of `JG`, `AQ`, and `J` columns, exactly matching the names above.
-- **CUDA error**: set `TRAIN_CONFIG['device'] = 'cpu'` in `config.py`, or install the PyTorch/CUDA combination that matches your system.
-- **Too few samples**: reduce `seq_length` or collect more chronologically ordered observations; each split needs more than the sequence length.
-- **Poor generalization**: use a later hold-out period, inspect sensor quality and missingness, and tune the sequence length and model settings. Do not select settings solely from the test set.
-
-## Review note
-
-The Python source files have passed syntax compilation, project-module import, random-tensor forward-pass, and Spearman adjacency-generation checks using Python 3.10.15 and PyTorch 2.4.1. `experiment.py` was also updated to use the current `TKAN_CONFIG` / `tkan_config` interface; unimplemented BiGRU and MLP comparison settings were removed.
+- **找不到数据文件**：检查 `DATA_CONFIG['file_path']` 和本地文件名。
+- **缺少列**：补齐 `JG1`–`JG11`、`AQ1`–`AQ17`、`J1`–`J20`，且严格使用上述列名。
+- **邻接矩阵尺寸错误**：使用 `19 × 19` 的矩阵，且顺序与“除目标点外的 J 列”一致，或让程序自动计算。
+- **样本过少**：每个时间段至少需要多于 `seq_length` 的记录；实际训练建议远多于此数量。
+- **CUDA 报错**：在 `config.py` 把设备改为 `cpu`，或安装匹配版本的 CUDA PyTorch。
 
