@@ -247,7 +247,7 @@ class TransformerEncoder(nn.Module):
 
 
 class GCN(nn.Module):
-    """Fixed Spearman-topology GCN with two 32-dimensional graph convolutions."""
+    """Twenty-node Spearman-topology GCN with two 32-dimensional convolutions."""
 
     def __init__(self, gcn_config, adjacency_matrix=None):
         super().__init__()
@@ -313,9 +313,8 @@ class PileDisplacementModel(nn.Module):
             + tkan_config["aq_input_dim"]
             + tkan_config["j_input_dim"]
         )
-        total_feature_dim = raw_feature_dim + transformer_config["hidden_dim"]
         self.tkan = TKAN(
-            input_dim=total_feature_dim,
+            input_dim=raw_feature_dim,
             hidden_dim=tkan_config["hidden_dim"],
             num_layers=tkan_config["num_layers"],
             output_dim=tkan_config["output_dim"],
@@ -324,18 +323,31 @@ class PileDisplacementModel(nn.Module):
             spline_order=tkan_config["spline_order"],
             dropout=tkan_config["dropout"],
         )
+        self.spatial_projection = nn.Linear(
+            transformer_config["hidden_dim"], tkan_config["hidden_dim"]
+        )
+        self.fusion_norm = nn.LayerNorm(tkan_config["hidden_dim"])
         self.prediction_head = nn.Linear(tkan_config["output_dim"], 1)
 
     def forward(self, features):
-        pile_features = features["j1_j20"]
-        _, sequence_length, _ = pile_features.shape
+        graph_pile_features = features["j1_j20"]
+        non_target_pile_features = features["j_non_target"]
+        _, sequence_length, _ = graph_pile_features.shape
         spatial_sequence = torch.stack(
-            [self.gcn(pile_features[:, step, :]) for step in range(sequence_length)], dim=1
+            [self.gcn(graph_pile_features[:, step, :]) for step in range(sequence_length)],
+            dim=1,
         )
         enhanced_spatial = self.transformer(spatial_sequence)
-        combined_features = torch.cat(
-            [features["jg1_jg11"], features["aq1_aq17"], pile_features, enhanced_spatial], dim=-1
+        raw_tkan_features = torch.cat(
+            [
+                features["jg1_jg11"],
+                features["aq1_aq17"],
+                non_target_pile_features,
+            ],
+            dim=-1,
         )
-        _, last_hidden = self.tkan(combined_features)
-        return self.prediction_head(last_hidden)
+        tkan_sequence, _ = self.tkan(raw_tkan_features)
+        spatial_context = self.spatial_projection(enhanced_spatial)
+        fused_sequence = self.fusion_norm(tkan_sequence + spatial_context)
+        return self.prediction_head(fused_sequence[:, -1, :])
 
