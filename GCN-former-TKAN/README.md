@@ -1,4 +1,4 @@
-# GCN-former-TKAN
+# GCN-Former-TKAN
 
 本仓库实现深基坑围护桩水平位移一步预测流程：以监测点间的空间关联为图结构，结合 GCN、Transformer 和 TKAN 预测指定桩点的下一时刻水平位移。
 
