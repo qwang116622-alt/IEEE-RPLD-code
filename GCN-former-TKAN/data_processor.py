@@ -88,7 +88,8 @@ class PileDisplacementDataset(Dataset):
         # 分离不同类型的监测点
         jg_cols = [f'JG{i}' for i in range(1, 12)]  # JG1-JG11
         aq_cols = [f'AQ{i}' for i in range(1, 18)]  # AQ1-AQ17
-        j_cols = get_pile_feature_columns(self.target_col)  # 19 non-target J points
+        j_cols = get_pile_feature_columns(self.target_col)  # 19 non-target raw inputs
+        j1_j20_cols = [f'J{i}' for i in range(1, 21)]       # 20 GCN graph nodes
 
         required_columns = jg_cols + aq_cols + [f'J{i}' for i in range(1, 21)]
         missing_columns = [column for column in required_columns if column not in self.data.columns]
@@ -99,6 +100,7 @@ class PileDisplacementDataset(Dataset):
         jg_data = self.data[jg_cols].values
         aq_data = self.data[aq_cols].values
         j_data = self.data[j_cols].values
+        j1_j20_data = self.data[j1_j20_cols].values
         target_data = self.data[self.target_col].values
         
         # 生成滑动窗口
@@ -107,6 +109,7 @@ class PileDisplacementDataset(Dataset):
             jg_seq = jg_data[i:i+self.seq_length]
             aq_seq = aq_data[i:i+self.seq_length]
             j_seq = j_data[i:i+self.seq_length]
+            j1_j20_seq = j1_j20_data[i:i+self.seq_length]
             
             # 提取目标值
             target = target_data[i+self.seq_length]
@@ -119,12 +122,14 @@ class PileDisplacementDataset(Dataset):
                 jg_seq = self._augment_sequence(jg_seq)
                 aq_seq = self._augment_sequence(aq_seq)
                 j_seq = self._augment_sequence(j_seq)
+                j1_j20_seq = self._augment_sequence(j1_j20_seq)
             
             # 将特征组合为字典
             feature = {
                 'jg': jg_seq,
                 'aq': aq_seq,
-                'j': j_seq
+                'j': j_seq,
+                'j1_j20': j1_j20_seq
             }
             
             features.append(feature)
@@ -142,12 +147,13 @@ class PileDisplacementDataset(Dataset):
         timestamp = self.timestamps[idx]
 
         # 转换为numpy数组，返回模型需要的所有特征
-        # j1_j20 keeps the historical model interface; it contains 19
-        # non-target pile features, not the target itself.
+        # The GCN receives all 20 graph nodes. j_non_target contains the 19
+        # non-target pile variables used in the manuscript's 47 raw inputs.
         feature_np = {
             'jg1_jg11': np.array(feature['jg'], dtype=np.float32),
             'aq1_aq17': np.array(feature['aq'], dtype=np.float32),
-            'j1_j20': np.array(feature['j'], dtype=np.float32)
+            'j1_j20': np.array(feature['j1_j20'], dtype=np.float32),
+            'j_non_target': np.array(feature['j'], dtype=np.float32)
         }
 
         # 将Timestamp转换为字符串格式，避免DataLoader的collate错误
@@ -371,7 +377,8 @@ if __name__ == '__main__':
         features, targets, timestamps = batch
         print(f"JG特征形状: {features['jg'].shape}")
         print(f"AQ特征形状: {features['aq'].shape}")
-        print(f"J特征形状: {features['j1_j20'].shape}（已排除目标点）")
+        print(f"GCN图节点形状: {features['j1_j20'].shape}（J1-J20）")
+        print(f"非目标J特征形状: {features['j_non_target'].shape}")
         print(f"目标形状: {targets.shape}")
         break
 
