@@ -4,7 +4,7 @@ import torch
 # 数据配置
 DATA_CONFIG = {
     # Keep the monitoring dataset local; this repository does not include data.
-    'file_path': 'data/preprocessed_data_no_normalization.xlsx',
+    'file_path': 'data/preprocessed_engineering_data.xlsx',
     'target_point': 'J19',  # 目标预测点
     'test_size': 0.2,      # 测试集比例
     'seq_length': 7,      # 时间序列长度
@@ -18,8 +18,8 @@ DATA_CONFIG = {
 
 # GCN配置（简化）
 GCN_CONFIG = {
-    # The target point is withheld from the 19 pile-deformation inputs.
-    'num_nodes': 19,
+    # The graph contains all retaining-pile monitoring points J1-J20.
+    'num_nodes': 20,
     'input_dim': 1,        # 每个节点的输入维度
     'hidden_dim': 32,
     'output_dim': 32,
