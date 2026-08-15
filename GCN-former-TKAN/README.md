@@ -1,6 +1,6 @@
 # GCN-former-TKAN
 
-本仓库实现论文中的深基坑围护桩水平位移一步预测流程：以监测点间的空间关联为图结构，结合 GCN、Transformer 和 TKAN 预测指定桩点的下一时刻水平位移。
+本仓库实现深基坑围护桩水平位移一步预测流程：以监测点间的空间关联为图结构，结合 GCN、Transformer 和 TKAN 预测指定桩点的下一时刻水平位移。
 
 > 仓库只包含代码，不包含监测数据、坐标、训练权重、预测表或图件。该工具用于科研复现和辅助分析，不能替代现场巡检、设计复核或工程预警决策。
 
@@ -8,9 +8,9 @@
 
 适用于拥有按时间排序的基坑监测数据的岩土工程研究人员、监测工程师和数据分析人员。每次预测使用连续 7 个历史时刻的数据，输出一个目标桩点在下一个时刻的位移预测值。
 
-论文对应的 TKAN 输入由 47 个变量组成：11 个 `JG` 特征、17 个 `AQ` 特征，以及除目标桩点外的 19 个围护桩位移特征。GCN 图使用完整的 `J1`–`J20` 共 20 个节点，包含目标点自身的历史位移；代码仅从 TKAN 的 47 维输入中排除 `target_point`。
+TKAN 输入由 47 个变量组成：11 个 `JG` 特征、17 个 `AQ` 特征，以及除目标桩点外的 19 个围护桩位移特征。GCN 图使用完整的 `J1`–`J20` 共 20 个节点，包含目标点自身的历史位移；代码仅从 TKAN 的 47 维输入中排除 `target_point`。
 
-## 论文对应的默认网络与超参数
+## 默认网络与超参数
 
 | 模块 | 当前默认实现 |
 | --- | --- |
@@ -56,20 +56,40 @@ GCN-former-TKAN/
 
 ## 安装与运行
 
-推荐使用 Python 3.10+。本代码使用 Python 3.10.15、PyTorch 2.4.1 进行过结构与随机数据前向/反向验证。
+推荐使用 Python 3.10+。本代码使用 Python 3.10.15、PyTorch 2.4.1 进行过结构与随机数据前向/反向验证。下面的环境名称只是示例，用户可以替换为自己的环境名称。
+
+### CPU 版本
 
 ```powershell
+conda create -n gcn_tkan_cpu python=3.10 -y
+conda activate gcn_tkan_cpu
 cd GCN-former-TKAN
-D:\AiSoftware\Anaconda3\envs\PyTorch_cpu\python.exe -m pip install -r requirements.txt
-D:\AiSoftware\Anaconda3\envs\PyTorch_cpu\python.exe main.py
+python -m pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
+python main.py
 ```
 
-在 CPU 环境中可直接运行；如需 CUDA，请安装与本机 CUDA 匹配的 PyTorch，并在 `config.py` 中确认设备设置。
+### GPU/CUDA 版本
+
+以下命令以 PyTorch 2.4.1 的 CUDA 12.1 安装包为例。用户应先用 `nvidia-smi` 检查 NVIDIA 驱动，并根据自己的系统选择匹配的 PyTorch CUDA 安装包；不要直接照搬不匹配的 CUDA 版本。
+
+```powershell
+conda create -n gcn_tkan_gpu python=3.10 -y
+conda activate gcn_tkan_gpu
+cd GCN-former-TKAN
+python -m pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cu121
+python -m pip install -r requirements.txt
+python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+python main.py
+```
+
+这里的 `python` 表示用户当前已激活环境中的 Python 解释器；不使用 Conda 的用户可先激活自己的 `venv`，或将 `python` 替换为自己环境中解释器的路径。程序会自动选择设备：检测到可用 CUDA 时使用 GPU，否则使用 CPU。
 
 要仅评估已经训练好的本地权重，请将权重置于 `outputs/best_model.pth` 后运行：
 
 ```powershell
-D:\AiSoftware\Anaconda3\envs\PyTorch_cpu\python.exe main.py --load_model
+# CPU：先激活 gcn_tkan_cpu；GPU：先激活 gcn_tkan_gpu
+python main.py --load_model
 ```
 
 ## 常用配置
@@ -92,12 +112,12 @@ DATA_CONFIG['test_size'] = 0.2
 
 ## 文件说明
 
-- `models.py`：论文配置的 GCN、位置编码 Transformer 与门控时序 KAN。
+- `models.py`：GCN、位置编码 Transformer 与门控时序 KAN 的网络定义。
 - `data_processor.py`：时间切分、仅训练集拟合的归一化、47 维输入序列构建。
 - `spearman_utils.py`：Spearman 图邻接矩阵生成。
 - `main.py`：训练、学习率调度、早停与最终测试评估。
 - `evaluator.py`：反归一化、指标、预测表和图件。
-- `experiment.py`：原始实验管理脚本；正式论文配置请以 `main.py` 和 `config.py` 为准。
+- `experiment.py`：实验管理脚本；默认模型配置请以 `main.py` 和 `config.py` 为准。
 
 ## 故障排查
 
